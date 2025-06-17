@@ -26,7 +26,7 @@ interface AnalysisLog {
   timestamp: number;
   network: string;
   maxSeverity: 'Low' | 'Medium' | 'High' | 'None';
-  findings: any; // Assuming findings is a JSON object/string
+  findings: Record<string, unknown>; // Assuming findings is a JSON object/string
   title?: string;
   thumbnail?: string;
 }
@@ -51,8 +51,8 @@ export default function LogsPage() {
         const data = await response.json();
         setLogs(data);
         setFilteredLogs(data); // Initialize filtered logs
-      } catch (err: any) {
-        setError(err.message);
+      } catch (err: unknown) {
+        setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
         setIsLoading(false);
       }

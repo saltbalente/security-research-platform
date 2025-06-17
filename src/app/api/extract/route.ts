@@ -47,15 +47,16 @@ export async function POST(request: Request) {
         console.warn(`[ExtractorService] yt-dlp stderr for ${videoUrl}:`, stderr);
       }
       ytDlpJsonString = stdout;
-    } catch (execError: any) {
+    } catch (execError: unknown) {
       console.error(`[ExtractorService] yt-dlp execution failed for ${videoUrl}:`, execError);
-      return NextResponse.json({ error: `Failed to execute yt-dlp: ${execError.message}` }, { status: 500 });
+      const errorMessage = execError instanceof Error ? execError.message : 'Unknown error';
+      return NextResponse.json({ error: `Failed to execute yt-dlp: ${errorMessage}` }, { status: 500 });
     }
 
     let ytDlpOutput: YtDlpOutput;
     try {
       ytDlpOutput = JSON.parse(ytDlpJsonString);
-    } catch (parseError: any) {
+    } catch (parseError: unknown) {
       console.error(`[ExtractorService] Failed to parse yt-dlp JSON output for ${videoUrl}:`, parseError, "Raw output:", ytDlpJsonString);
       return NextResponse.json({ error: 'Failed to parse video information from yt-dlp' }, { status: 500 });
     }
@@ -63,7 +64,7 @@ export async function POST(request: Request) {
     const title = ytDlpOutput.title || 'Untitled Video';
     const thumbnail = ytDlpOutput.thumbnail || '';
     let finalUrl = ytDlpOutput.url;
-    let finalExt = ytDlpOutput.ext;
+    const finalExt = ytDlpOutput.ext;
     let finalSize = ytDlpOutput.filesize || ytDlpOutput.filesize_approx || 0;
 
     // Prioritize top-level URL if it's MP4 (yt-dlp with -f should provide this)
@@ -109,8 +110,9 @@ export async function POST(request: Request) {
 
     return NextResponse.json(responseData);
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[ExtractorService] Unhandled error:', error);
-    return NextResponse.json({ error: `Failed to extract video information: ${error.message}` }, { status: 500 });
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    return NextResponse.json({ error: `Failed to extract video information: ${errorMessage}` }, { status: 500 });
   }
 }

@@ -1,6 +1,7 @@
 "use client"; // Required for useState, useEffect, and event handlers
 
 import { useState, useEffect } from 'react';
+import Image from 'next/image';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -133,14 +134,14 @@ export default function Home() {
           }),
         });
         // console.log('Log saved successfully');
-      } catch (logError: any) {
+      } catch (logError: unknown) {
         console.error("Failed to save log:", logError);
         // Optionally notify user that logging failed, but analysis was successful
       }
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Analysis failed:", err);
-      setError(err.message || "An unknown error occurred during analysis.");
+      setError(err instanceof Error ? err.message : "An unknown error occurred during analysis.");
     }
     setIsLoading(false);
   };
@@ -247,10 +248,11 @@ export default function Home() {
             <CardContent className="space-y-4">
               <div className="relative rounded-md aspect-video bg-gray-100 overflow-hidden">
                 {analysisResult.thumbnail ? (
-                  <img 
+                  <Image 
                     src={analysisResult.thumbnail} 
                     alt={analysisResult.title || 'Video thumbnail'} 
-                    className="w-full h-full object-cover"
+                    fill
+                    className="object-cover"
                     onError={(e) => {
                       const target = e.target as HTMLImageElement;
                       target.style.display = 'none';

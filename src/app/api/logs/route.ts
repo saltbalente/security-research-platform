@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/db';
 import { analysisLogs } from '@/db/schema';
-import { desc, eq } from 'drizzle-orm';
+import { desc } from 'drizzle-orm';
 
 // Define the structure for a new log entry, matching the schema
 interface NewLogEntry {
@@ -9,7 +9,7 @@ interface NewLogEntry {
   finalUrl: string;
   network: string; // 'instagram' or 'x'
   maxSeverity: 'Low' | 'Medium' | 'High' | 'None';
-  findings: any; // JSON string or object
+  findings: Record<string, unknown>; // JSON string or object
   title?: string;
   thumbnail?: string;
   sizeApprox?: number;
@@ -25,7 +25,7 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+export async function POST(_request: Request) {
   try {
     const body = await request.json() as NewLogEntry;
 
