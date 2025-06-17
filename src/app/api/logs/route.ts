@@ -15,7 +15,7 @@ interface NewLogEntry {
   sizeApprox?: number;
 }
 
-export async function GET(_request: Request) {
+export async function GET() {
   try {
     const logs = await db.select().from(analysisLogs).orderBy(desc(analysisLogs.timestamp));
     return NextResponse.json(logs);
@@ -25,9 +25,9 @@ export async function GET(_request: Request) {
   }
 }
 
-export async function POST(_request: Request) {
+export async function POST(request: Request) {
   try {
-    const body = await _request.json() as NewLogEntry;
+    const body = await request.json() as NewLogEntry;
 
     // Basic validation
     if (!body.originalUrl || !body.finalUrl || !body.network || !body.maxSeverity || body.findings === undefined) {
