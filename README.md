@@ -1,36 +1,85 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Security Research Platform
 
-## Getting Started
+Este es un prototipo educativo para analizar URLs de videos de Instagram y X (anteriormente Twitter) en busca de posibles vulnerabilidades de seguridad.
 
-First, run the development server:
+## Tecnologías Usadas
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
-```
+- Next.js 14 (App Router)
+- React 18
+- TypeScript
+- Tailwind CSS
+- shadcn/ui
+- Drizzle ORM (con SQLite)
+- (Próximamente) yt-dlp para extracción de video
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Configuración y Ejecución
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+1.  **Clonar el repositorio (si aplica) o tener los archivos del proyecto.**
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+2.  **Instalar dependencias:**
+    ```bash
+    npm install
+    # o
+    # yarn install
+    # o
+    # pnpm install 
+    ```
 
-## Learn More
+3.  **Configurar la base de datos SQLite:**
+    Los archivos de migración se generan basados en `src/db/schema.ts`.
+    ```bash
+    # Generar archivos de migración (si hay cambios en el schema)
+    npm run db:generate
 
-To learn more about Next.js, take a look at the following resources:
+    # Aplicar migraciones a la base de datos (creará sqlite.db si no existe)
+    npm run db:migrate
+    ```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+4.  **Ejecutar el servidor de desarrollo:**
+    ```bash
+    npm run dev
+    # o
+    # yarn dev
+    # o
+    # pnpm dev
+    ```
+    La aplicación estará disponible en `http://localhost:3000`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Estructura del Proyecto (Resumen)
 
-## Deploy on Vercel
+-   `src/app/`: Páginas principales de la aplicación (usando App Router).
+    -   `page.tsx`: Página de inicio para análisis de URL.
+    -   `logs/page.tsx`: Página para ver el historial de análisis.
+    -   `api/`: Rutas de API.
+        -   `extract/route.ts`: Endpoint para extraer información del video.
+        -   `logs/route.ts`: Endpoint para gestionar los logs de análisis.
+-   `src/components/ui/`: Componentes de UI de shadcn/ui.
+-   `src/lib/`: Librerías y utilidades.
+    -   `utils.ts`: Utilidades generales (ej: `cn` de shadcn).
+    -   `vulnerability-scanner.ts`: Lógica para escanear vulnerabilidades.
+-   `src/db/`: Configuración y schema de la base de datos Drizzle.
+    -   `schema.ts`: Definición de las tablas de la base de datos.
+    -   `index.ts`: Cliente de Drizzle.
+-   `drizzle/`: Archivos de migración generados por Drizzle Kit.
+-   `drizzle.config.ts`: Configuración para Drizzle Kit.
+-   `public/`: Archivos estáticos.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Funcionalidades Implementadas (Hasta Ahora)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+-   Interfaz de usuario para pegar URL y mostrar resultados.
+-   Modal de aceptación legal.
+-   Servicio de extracción de video (actualmente con datos mock).
+-   Escáner de vulnerabilidades (con lógica básica y placeholders).
+-   Registro de análisis en base de datos SQLite.
+-   Página de historial para ver logs con filtros básicos.
+
+## Próximos Pasos (Pendientes)
+
+-   Integración real de `yt-dlp` en `ExtractorService`.
+-   Mejorar la lógica y cobertura del `VulnerabilityScanner`.
+    -   Realizar peticiones HTTP para verificar CORS y otros headers.
+    -   Analizar metadatos de forma más profunda.
+-   Implementar tests (Playwright).
+-   Mejorar el manejo de errores y la experiencia de usuario.
+-   Considerar la Share Extension (opcional).
+-   Asegurar el cumplimiento de todas las consideraciones de seguridad.
