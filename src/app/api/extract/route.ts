@@ -57,13 +57,11 @@ interface FxTwitterResponse {
   };
 }
 
-interface TwitterVideoInfo {
-  variants?: Array<{
-    content_type: string;
-    url: string;
-    bitrate?: number;
-  }>;
-}
+
+
+// Configuración optimizada para Vercel
+const VERCEL_TIMEOUT = 8000; // 8 segundos máximo
+const QUICK_TIMEOUT = 5000;   // 5 segundos para requests rápidos
 
 export async function POST(request: Request) {
   try {
@@ -119,20 +117,66 @@ async function extractFromTwitterAdvanced(videoUrl: string): Promise<VideoInfo> 
     
     const tweetId = tweetMatch[1];
     
-    // Método 1: Usar la API syndication de Twitter (pública)
+    // Método 1: Usar servicio de terceros (más rápido y confiable para Vercel)
+    try {
+      const backupUrl = `https://api.fxtwitter.com/status/${tweetId}`;
+      
+      const response = await axios.get(backupUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; SecurityResearchBot/1.0)',
+          'Accept': 'application/json',
+          'Accept-Encoding': 'gzip, deflate, br',
+        },
+        timeout: QUICK_TIMEOUT,
+        validateStatus: (status) => status < 500, // Aceptar códigos 4xx
+      });
+
+      if (response.status === 200 && response.data?.tweet?.media) {
+        const data: FxTwitterResponse = response.data;
+        const media = data.tweet?.media?.videos?.[0];
+        if (media && media.variants) {
+          const variants: VideoVariant[] = media.variants
+            .filter((variant) => variant.content_type === 'video/mp4')
+            .map((variant) => ({
+              url: variant.url,
+              quality: getQualityFromBitrate(variant.bitrate),
+              resolution: getResolutionFromBitrate(variant.bitrate),
+              bitrate: variant.bitrate,
+              contentType: 'video/mp4',
+            }))
+            .sort((a: VideoVariant, b: VideoVariant) => (b.bitrate || 0) - (a.bitrate || 0));
+
+          if (variants.length > 0) {
+            return {
+              id: tweetId,
+              title: data.tweet?.text || 'Video de X/Twitter',
+              thumbnail: media.thumbnail_url,
+              variants: variants,
+              author: data.tweet?.author?.name,
+            };
+          }
+        }
+      }
+    } catch (backupError) {
+      console.warn('[ExtractorService] FxTwitter API failed:', backupError);
+    }
+
+    // Método 2: API syndication de Twitter (optimizada para Vercel)
     try {
       const syndicationUrl = `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&lang=en`;
       
       const response = await axios.get(syndicationUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'User-Agent': 'Mozilla/5.0 (compatible; SecurityResearchBot/1.0)',
           'Accept': 'application/json',
           'Referer': 'https://platform.twitter.com/',
+          'Accept-Encoding': 'gzip, deflate, br',
         },
-        timeout: 10000,
+        timeout: VERCEL_TIMEOUT,
+        validateStatus: (status) => status < 500,
       });
 
-      if (response.data && response.data.mediaDetails) {
+      if (response.status === 200 && response.data?.mediaDetails) {
         const data: TwitterSyndicationResponse = response.data;
         const mediaDetails = data.mediaDetails?.find((media) => media.type === 'video');
         
@@ -163,110 +207,49 @@ async function extractFromTwitterAdvanced(videoUrl: string): Promise<VideoInfo> 
       console.warn('[ExtractorService] Twitter syndication API failed:', syndicationError);
     }
 
-    // Método 2: Web scraping del HTML de Twitter
+    // Método 3: Web scraping simplificado (último recurso)
     try {
       const response = await axios.get(videoUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'User-Agent': 'Mozilla/5.0 (compatible; SecurityResearchBot/1.0)',
+          'Accept': 'text/html,application/xhtml+xml',
           'Accept-Language': 'en-US,en;q=0.9',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'DNT': '1',
-          'Connection': 'keep-alive',
-          'Upgrade-Insecure-Requests': '1',
         },
-        timeout: 15000,
+        timeout: VERCEL_TIMEOUT,
+        validateStatus: (status) => status < 500,
+        maxRedirects: 3,
       });
 
       if (response.status === 200) {
         const html = response.data;
         const $ = cheerio.load(html);
         
-        // Buscar datos JSON embebidos
-        const scripts = $('script').toArray();
+        // Buscar metadatos básicos
+        const videoUrl1 = $('meta[property="og:video:url"]').attr('content');
+        const videoUrl2 = $('meta[property="og:video:secure_url"]').attr('content');
+        const title = $('meta[property="og:title"]').attr('content') || 'Video de X/Twitter';
+        const thumbnail = $('meta[property="og:image"]').attr('content');
         
-        for (const script of scripts) {
-          const scriptContent = $(script).html();
-          if (scriptContent && scriptContent.includes('video_info')) {
-            try {
-              // Extraer JSON de los scripts
-              const jsonMatch = scriptContent.match(/"video_info":\s*({[^}]+})/);
-              if (jsonMatch) {
-                const videoInfo: TwitterVideoInfo = JSON.parse(jsonMatch[1]);
-                if (videoInfo.variants) {
-                  const variants: VideoVariant[] = videoInfo.variants
-                    .filter((variant) => variant.content_type === 'video/mp4')
-                    .map((variant) => ({
-                      url: variant.url,
-                      quality: getQualityFromBitrate(variant.bitrate),
-                      resolution: getResolutionFromBitrate(variant.bitrate),
-                      bitrate: variant.bitrate,
-                      contentType: 'video/mp4',
-                    }))
-                    .sort((a: VideoVariant, b: VideoVariant) => (b.bitrate || 0) - (a.bitrate || 0));
-
-                  if (variants.length > 0) {
-                    const title = $('meta[property="og:title"]').attr('content') || 'Video de X/Twitter';
-                    const thumbnail = $('meta[property="og:image"]').attr('content');
-                    
-                    return {
-                      id: tweetId,
-                      title: title,
-                      thumbnail: thumbnail,
-                      variants: variants,
-                    };
-                  }
-                }
+        const finalVideoUrl = videoUrl1 || videoUrl2;
+        
+        if (finalVideoUrl) {
+          return {
+            id: tweetId,
+            title: title,
+            thumbnail: thumbnail,
+            variants: [
+              {
+                url: finalVideoUrl,
+                quality: 'HD',
+                resolution: 'Auto',
+                contentType: 'video/mp4',
               }
-            } catch (parseError) {
-              console.warn('[ExtractorService] JSON parsing failed:', parseError);
-            }
-          }
+            ],
+          };
         }
       }
     } catch (scrapeError) {
       console.warn('[ExtractorService] Twitter HTML scraping failed:', scrapeError);
-    }
-
-    // Método 3: Usar un servicio de terceros (como backup)
-    try {
-      const backupUrl = `https://api.fxtwitter.com/status/${tweetId}`;
-      
-      const response = await axios.get(backupUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; TwitterVideoExtractor/1.0)',
-        },
-        timeout: 10000,
-      });
-
-      if (response.data && response.data.tweet && response.data.tweet.media) {
-        const data: FxTwitterResponse = response.data;
-        const media = data.tweet?.media?.videos?.[0];
-        if (media && media.variants) {
-          const variants: VideoVariant[] = media.variants
-            .filter((variant) => variant.content_type === 'video/mp4')
-            .map((variant) => ({
-              url: variant.url,
-              quality: getQualityFromBitrate(variant.bitrate),
-              resolution: getResolutionFromBitrate(variant.bitrate),
-              bitrate: variant.bitrate,
-              contentType: 'video/mp4',
-            }))
-            .sort((a: VideoVariant, b: VideoVariant) => (b.bitrate || 0) - (a.bitrate || 0));
-
-          if (variants.length > 0) {
-            return {
-              id: tweetId,
-              title: data.tweet?.text || 'Video de X/Twitter',
-              thumbnail: media.thumbnail_url,
-              variants: variants,
-              author: data.tweet?.author?.name,
-            };
-          }
-        }
-      }
-    } catch (backupError) {
-      console.warn('[ExtractorService] Backup service failed:', backupError);
     }
 
     // Fallback: generar variantes de demostración
@@ -311,19 +294,17 @@ async function extractFromInstagramAdvanced(videoUrl: string): Promise<VideoInfo
 
     const shortcode = match[1];
     
-    // Método 1: Web scraping del HTML de Instagram
+    // Método optimizado para Vercel
     try {
       const response = await axios.get(`https://www.instagram.com/p/${shortcode}/`, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'User-Agent': 'Mozilla/5.0 (compatible; SecurityResearchBot/1.0)',
+          'Accept': 'text/html,application/xhtml+xml',
           'Accept-Language': 'en-US,en;q=0.9',
-          'Accept-Encoding': 'gzip, deflate, br',
-          'DNT': '1',
-          'Connection': 'keep-alive',
-          'Upgrade-Insecure-Requests': '1',
         },
-        timeout: 15000,
+        timeout: VERCEL_TIMEOUT,
+        validateStatus: (status) => status < 500,
+        maxRedirects: 3,
       });
 
       if (response.status === 200) {
@@ -352,33 +333,6 @@ async function extractFromInstagramAdvanced(videoUrl: string): Promise<VideoInfo
               }
             ],
           };
-        }
-        
-        // Buscar en scripts embebidos
-        const scripts = $('script').toArray();
-        
-        for (const script of scripts) {
-          const scriptContent = $(script).html();
-          if (scriptContent && scriptContent.includes('video_url')) {
-            const videoUrlMatch = scriptContent.match(/"video_url":"([^"]+)"/);
-            if (videoUrlMatch && videoUrlMatch[1]) {
-              const videoUrl = videoUrlMatch[1].replace(/\\u0026/g, '&').replace(/\\/g, '');
-              
-              return {
-                id: shortcode,
-                title: title,
-                thumbnail: thumbnail,
-                variants: [
-                  {
-                    url: videoUrl,
-                    quality: 'HD',
-                    resolution: 'Auto',
-                    contentType: 'video/mp4',
-                  }
-                ],
-              };
-            }
-          }
         }
       }
     } catch (scrapeError) {
