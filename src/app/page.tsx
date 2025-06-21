@@ -40,12 +40,25 @@ interface Vulnerability {
   description: string;
 }
 
+interface VideoVariant {
+  url: string;
+  quality: string;
+  resolution?: string;
+  bitrate?: number;
+  contentType: string;
+  fileSize?: number;
+}
+
 interface AnalysisResult {
-  mp4Url: string;
+  mp4Url: string; // Mantener para compatibilidad
   title?: string;
   thumbnail?: string;
   sizeApprox?: number;
   vulnerabilities: Vulnerability[];
+  // Nuevos campos
+  variants?: VideoVariant[];
+  author?: string;
+  duration?: number;
 }
 
 export default function Home() {
@@ -104,6 +117,10 @@ export default function Home() {
         thumbnail: extractedData.thumbnail,
         sizeApprox: extractedData.sizeApprox,
         vulnerabilities,
+        // Nuevos campos
+        variants: extractedData.variants,
+        author: extractedData.author,
+        duration: extractedData.duration,
       });
 
       // Step 3: Save to logs
@@ -279,6 +296,63 @@ export default function Home() {
               <div className="aspect-video bg-muted rounded-md overflow-hidden">
                 <video controls src={analysisResult.mp4Url} className="w-full h-full" />
               </div>
+              
+              {/* Sección de Descargas - Similar a XvideoDownloader.net */}
+              {analysisResult.variants && analysisResult.variants.length > 0 && (
+                <Card className="w-full">
+                  <CardHeader>
+                    <CardTitle className="flex items-center">
+                      <LucideVideotape className="mr-2 h-5 w-5" />
+                      Opciones de Descarga
+                    </CardTitle>
+                    <CardDescription>
+                      Selecciona la calidad de video que deseas descargar
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {analysisResult.variants.map((variant, index) => (
+                        <div key={index} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
+                          <div className="flex items-center space-x-3">
+                            <div className="flex flex-col">
+                              <span className="font-medium text-sm">
+                                {variant.quality} {variant.resolution && `(${variant.resolution})`}
+                              </span>
+                              <span className="text-xs text-muted-foreground">
+                                {variant.contentType}
+                                {variant.bitrate && ` • ${Math.round(variant.bitrate / 1000)}kbps`}
+                                {variant.fileSize && ` • ${(variant.fileSize / 1024 / 1024).toFixed(1)}MB`}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="flex space-x-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => window.open(variant.url, '_blank')}
+                            >
+                              Reproducir
+                            </Button>
+                            <Button
+                              size="sm"
+                              onClick={() => {
+                                const link = document.createElement('a');
+                                link.href = variant.url;
+                                link.download = `video-${variant.quality}-${Date.now()}.mp4`;
+                                document.body.appendChild(link);
+                                link.click();
+                                document.body.removeChild(link);
+                              }}
+                            >
+                              Descargar
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
               <Accordion type="single" collapsible className="w-full">
                 <AccordionItem value="item-1">
                   <AccordionTrigger>URL Final del Video</AccordionTrigger>

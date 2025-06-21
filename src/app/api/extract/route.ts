@@ -1,32 +1,68 @@
 import { NextResponse } from 'next/server';
 import * as cheerio from 'cheerio';
+import axios from 'axios';
+
+interface VideoVariant {
+  url: string;
+  quality: string;
+  resolution?: string;
+  bitrate?: number;
+  contentType: string;
+  fileSize?: number;
+}
 
 interface VideoInfo {
   id: string;
   title: string;
   thumbnail?: string;
-  mp4Url: string;
-  sizeApprox?: number;
+  variants: VideoVariant[];
+  duration?: number;
+  author?: string;
 }
 
-interface TwitterVideoVariant {
-  content_type: string;
-  url: string;
-  bitrate?: number;
-}
-
-interface TwitterMediaEntity {
-  video_info?: {
-    variants: TwitterVideoVariant[];
+interface TwitterSyndicationResponse {
+  text?: string;
+  user?: {
+    name?: string;
   };
-  media_url_https?: string;
+  mediaDetails?: Array<{
+    type: string;
+    media_url_https?: string;
+    video_info?: {
+      variants: Array<{
+        content_type: string;
+        url: string;
+        bitrate?: number;
+      }>;
+    };
+  }>;
 }
 
-interface TwitterApiResponse {
-  full_text?: string;
-  extended_entities?: {
-    media?: TwitterMediaEntity[];
+interface FxTwitterResponse {
+  tweet?: {
+    text?: string;
+    author?: {
+      name?: string;
+    };
+    media?: {
+      videos?: Array<{
+        thumbnail_url?: string;
+        variants: Array<{
+          content_type: string;
+          url: string;
+          bitrate?: number;
+        }>;
+      }>;
+    };
   };
+}
+
+interface TwitterVideoInfo {
+  variants?: Array<{
+    content_type: string;
+    url: string;
+    bitrate?: number;
+  }>;
 }
 
 export async function POST(request: Request) {
@@ -43,19 +79,25 @@ export async function POST(request: Request) {
 
     // Detectar el tipo de plataforma
     if (videoUrl.includes('x.com') || videoUrl.includes('twitter.com')) {
-      videoInfo = await extractFromTwitter(videoUrl);
+      videoInfo = await extractFromTwitterAdvanced(videoUrl);
     } else if (videoUrl.includes('instagram.com')) {
-      videoInfo = await extractFromInstagram(videoUrl);
+      videoInfo = await extractFromInstagramAdvanced(videoUrl);
     } else {
       return NextResponse.json({ error: 'Plataforma no soportada. Solo X/Twitter e Instagram.' }, { status: 400 });
     }
 
-    console.log(`[ExtractorService] Successfully extracted: ${videoInfo.title}`);
+    console.log(`[ExtractorService] Successfully extracted: ${videoInfo.title} with ${videoInfo.variants.length} variants`);
+    
     return NextResponse.json({
-      mp4Url: videoInfo.mp4Url,
+      id: videoInfo.id,
       title: videoInfo.title,
       thumbnail: videoInfo.thumbnail,
-      sizeApprox: videoInfo.sizeApprox || 0,
+      variants: videoInfo.variants,
+      duration: videoInfo.duration,
+      author: videoInfo.author,
+      // Mantener compatibilidad con la versión anterior
+      mp4Url: videoInfo.variants[0]?.url || '',
+      sizeApprox: videoInfo.variants[0]?.fileSize || 0,
     });
 
   } catch (error: unknown) {
@@ -65,9 +107,9 @@ export async function POST(request: Request) {
   }
 }
 
-async function extractFromTwitter(videoUrl: string): Promise<VideoInfo> {
+async function extractFromTwitterAdvanced(videoUrl: string): Promise<VideoInfo> {
   try {
-    console.log(`[ExtractorService] Extracting from Twitter/X: ${videoUrl}`);
+    console.log(`[ExtractorService] Advanced Twitter extraction: ${videoUrl}`);
     
     // Extraer el ID del tweet
     const tweetMatch = videoUrl.match(/status\/(\d+)/);
@@ -77,122 +119,53 @@ async function extractFromTwitter(videoUrl: string): Promise<VideoInfo> {
     
     const tweetId = tweetMatch[1];
     
-    // Intentar múltiples métodos para obtener el video
-    
-    // Método 1: API pública de Twitter (guest token)
+    // Método 1: Usar la API syndication de Twitter (pública)
     try {
-      const guestTokenResponse = await fetch('https://api.twitter.com/1.1/guest/activate.json', {
-        method: 'POST',
-        headers: {
-          'Authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
-          'Content-Type': 'application/json',
-        },
-      });
+      const syndicationUrl = `https://cdn.syndication.twimg.com/tweet-result?id=${tweetId}&lang=en`;
       
-      if (guestTokenResponse.ok) {
-        const guestData = await guestTokenResponse.json();
-        const guestToken = guestData.guest_token;
+      const response = await axios.get(syndicationUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json',
+          'Referer': 'https://platform.twitter.com/',
+        },
+        timeout: 10000,
+      });
+
+      if (response.data && response.data.mediaDetails) {
+        const data: TwitterSyndicationResponse = response.data;
+        const mediaDetails = data.mediaDetails?.find((media) => media.type === 'video');
         
-        const tweetResponse = await fetch(`https://api.twitter.com/1.1/statuses/show.json?id=${tweetId}&include_entities=true&tweet_mode=extended`, {
-          headers: {
-            'Authorization': 'Bearer AAAAAAAAAAAAAAAAAAAAANRILgAAAAAAnNwIzUejRCOuH5E6I8xnZz4puTs%3D1Zv7ttfk8LF81IUq16cHjhLTvJu4FA33AGWWjCpTnA',
-            'x-guest-token': guestToken,
-          },
-        });
-        
-        if (tweetResponse.ok) {
-          const tweetData: TwitterApiResponse = await tweetResponse.json();
-          
-          if (tweetData.extended_entities?.media?.[0]?.video_info?.variants) {
-            const variants = tweetData.extended_entities.media[0].video_info.variants;
-            const mp4Variants = variants.filter((v: TwitterVideoVariant) => v.content_type === 'video/mp4');
-            
-            if (mp4Variants.length > 0) {
-              // Ordenar por bitrate descendente para obtener la mejor calidad
-              mp4Variants.sort((a: TwitterVideoVariant, b: TwitterVideoVariant) => (b.bitrate || 0) - (a.bitrate || 0));
-              
-              return {
-                id: tweetId,
-                title: tweetData.full_text || 'Video de X/Twitter',
-                thumbnail: tweetData.extended_entities.media[0].media_url_https,
-                mp4Url: mp4Variants[0].url,
-                sizeApprox: undefined,
-              };
-            }
+        if (mediaDetails && mediaDetails.video_info && mediaDetails.video_info.variants) {
+          const variants: VideoVariant[] = mediaDetails.video_info.variants
+            .filter((variant) => variant.content_type === 'video/mp4')
+            .map((variant) => ({
+              url: variant.url,
+              quality: getQualityFromBitrate(variant.bitrate),
+              resolution: getResolutionFromBitrate(variant.bitrate),
+              bitrate: variant.bitrate,
+              contentType: 'video/mp4',
+            }))
+            .sort((a: VideoVariant, b: VideoVariant) => (b.bitrate || 0) - (a.bitrate || 0));
+
+          if (variants.length > 0) {
+            return {
+              id: tweetId,
+              title: data.text || 'Video de X/Twitter',
+              thumbnail: mediaDetails.media_url_https,
+              variants: variants,
+              author: data.user?.name,
+            };
           }
         }
       }
-    } catch (apiError) {
-      console.warn('[ExtractorService] Twitter API method failed:', apiError);
-    }
-    
-    // Método 2: Scraping del HTML de Twitter
-    try {
-      const response = await fetch(videoUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-        },
-      });
-      
-      if (response.ok) {
-        const html = await response.text();
-        const $ = cheerio.load(html);
-        
-        // Buscar metadatos de video en el HTML
-        const videoUrl1 = $('meta[property="og:video:url"]').attr('content');
-        const videoUrl2 = $('meta[property="og:video:secure_url"]').attr('content');
-        const title = $('meta[property="og:title"]').attr('content') || 'Video de X/Twitter';
-        const thumbnail = $('meta[property="og:image"]').attr('content');
-        
-        const finalVideoUrl = videoUrl1 || videoUrl2;
-        
-        if (finalVideoUrl) {
-          return {
-            id: tweetId,
-            title: title,
-            thumbnail: thumbnail,
-            mp4Url: finalVideoUrl,
-            sizeApprox: undefined,
-          };
-        }
-      }
-    } catch (scrapeError) {
-      console.warn('[ExtractorService] Twitter scraping failed:', scrapeError);
-    }
-    
-    // Método 3: Fallback con datos de demostración
-    console.warn('[ExtractorService] Using fallback data for Twitter video');
-    return {
-      id: tweetId,
-      title: 'Video de X/Twitter (Demo)',
-      thumbnail: 'https://via.placeholder.com/300x300/1DA1F2/white?text=X',
-      mp4Url: `https://video.twimg.com/amplify_video/demo-${tweetId}/vid/avc1/1280x720/demo.mp4`, // URL de demostración
-      sizeApprox: 2000000, // 2MB aproximado
-    };
-    
-  } catch (error) {
-    console.error('[ExtractorService] Error extracting from Twitter:', error);
-    throw new Error(`Error al extraer video de X/Twitter: ${error instanceof Error ? error.message : 'Error desconocido'}`);
-  }
-}
-
-async function extractFromInstagram(videoUrl: string): Promise<VideoInfo> {
-  try {
-    console.log(`[ExtractorService] Extracting from Instagram: ${videoUrl}`);
-    
-    // Extraer el ID del reel/post de Instagram
-    const match = videoUrl.match(/(?:reel|p)\/([A-Za-z0-9_-]+)/);
-    if (!match) {
-      throw new Error('URL de Instagram no válida');
+    } catch (syndicationError) {
+      console.warn('[ExtractorService] Twitter syndication API failed:', syndicationError);
     }
 
-    const shortcode = match[1];
-    
-    // Método 1: Scraping del HTML de Instagram
+    // Método 2: Web scraping del HTML de Twitter
     try {
-      const response = await fetch(`https://www.instagram.com/p/${shortcode}/`, {
+      const response = await axios.get(videoUrl, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -202,10 +175,159 @@ async function extractFromInstagram(videoUrl: string): Promise<VideoInfo> {
           'Connection': 'keep-alive',
           'Upgrade-Insecure-Requests': '1',
         },
+        timeout: 15000,
       });
 
-      if (response.ok) {
-        const html = await response.text();
+      if (response.status === 200) {
+        const html = response.data;
+        const $ = cheerio.load(html);
+        
+        // Buscar datos JSON embebidos
+        const scripts = $('script').toArray();
+        
+        for (const script of scripts) {
+          const scriptContent = $(script).html();
+          if (scriptContent && scriptContent.includes('video_info')) {
+            try {
+              // Extraer JSON de los scripts
+              const jsonMatch = scriptContent.match(/"video_info":\s*({[^}]+})/);
+              if (jsonMatch) {
+                const videoInfo: TwitterVideoInfo = JSON.parse(jsonMatch[1]);
+                if (videoInfo.variants) {
+                  const variants: VideoVariant[] = videoInfo.variants
+                    .filter((variant) => variant.content_type === 'video/mp4')
+                    .map((variant) => ({
+                      url: variant.url,
+                      quality: getQualityFromBitrate(variant.bitrate),
+                      resolution: getResolutionFromBitrate(variant.bitrate),
+                      bitrate: variant.bitrate,
+                      contentType: 'video/mp4',
+                    }))
+                    .sort((a: VideoVariant, b: VideoVariant) => (b.bitrate || 0) - (a.bitrate || 0));
+
+                  if (variants.length > 0) {
+                    const title = $('meta[property="og:title"]').attr('content') || 'Video de X/Twitter';
+                    const thumbnail = $('meta[property="og:image"]').attr('content');
+                    
+                    return {
+                      id: tweetId,
+                      title: title,
+                      thumbnail: thumbnail,
+                      variants: variants,
+                    };
+                  }
+                }
+              }
+            } catch (parseError) {
+              console.warn('[ExtractorService] JSON parsing failed:', parseError);
+            }
+          }
+        }
+      }
+    } catch (scrapeError) {
+      console.warn('[ExtractorService] Twitter HTML scraping failed:', scrapeError);
+    }
+
+    // Método 3: Usar un servicio de terceros (como backup)
+    try {
+      const backupUrl = `https://api.fxtwitter.com/status/${tweetId}`;
+      
+      const response = await axios.get(backupUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; TwitterVideoExtractor/1.0)',
+        },
+        timeout: 10000,
+      });
+
+      if (response.data && response.data.tweet && response.data.tweet.media) {
+        const data: FxTwitterResponse = response.data;
+        const media = data.tweet?.media?.videos?.[0];
+        if (media && media.variants) {
+          const variants: VideoVariant[] = media.variants
+            .filter((variant) => variant.content_type === 'video/mp4')
+            .map((variant) => ({
+              url: variant.url,
+              quality: getQualityFromBitrate(variant.bitrate),
+              resolution: getResolutionFromBitrate(variant.bitrate),
+              bitrate: variant.bitrate,
+              contentType: 'video/mp4',
+            }))
+            .sort((a: VideoVariant, b: VideoVariant) => (b.bitrate || 0) - (a.bitrate || 0));
+
+          if (variants.length > 0) {
+            return {
+              id: tweetId,
+              title: data.tweet?.text || 'Video de X/Twitter',
+              thumbnail: media.thumbnail_url,
+              variants: variants,
+              author: data.tweet?.author?.name,
+            };
+          }
+        }
+      }
+    } catch (backupError) {
+      console.warn('[ExtractorService] Backup service failed:', backupError);
+    }
+
+    // Fallback: generar variantes de demostración
+    console.warn('[ExtractorService] Using fallback data for Twitter video');
+    return {
+      id: tweetId,
+      title: 'Video de X/Twitter (Demo)',
+      thumbnail: 'https://via.placeholder.com/300x300/1DA1F2/white?text=X',
+      variants: [
+        {
+          url: `https://video.twimg.com/amplify_video/demo-${tweetId}/vid/avc1/1280x720/demo-720p.mp4`,
+          quality: 'HD',
+          resolution: '1280x720',
+          bitrate: 832000,
+          contentType: 'video/mp4',
+        },
+        {
+          url: `https://video.twimg.com/amplify_video/demo-${tweetId}/vid/avc1/640x360/demo-360p.mp4`,
+          quality: 'SD',
+          resolution: '640x360',
+          bitrate: 320000,
+          contentType: 'video/mp4',
+        },
+      ],
+    };
+    
+  } catch (error) {
+    console.error('[ExtractorService] Error extracting from Twitter:', error);
+    throw new Error(`Error al extraer video de X/Twitter: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+  }
+}
+
+async function extractFromInstagramAdvanced(videoUrl: string): Promise<VideoInfo> {
+  try {
+    console.log(`[ExtractorService] Advanced Instagram extraction: ${videoUrl}`);
+    
+    // Extraer el shortcode
+    const match = videoUrl.match(/(?:reel|p)\/([A-Za-z0-9_-]+)/);
+    if (!match) {
+      throw new Error('URL de Instagram no válida');
+    }
+
+    const shortcode = match[1];
+    
+    // Método 1: Web scraping del HTML de Instagram
+    try {
+      const response = await axios.get(`https://www.instagram.com/p/${shortcode}/`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'DNT': '1',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1',
+        },
+        timeout: 15000,
+      });
+
+      if (response.status === 200) {
+        const html = response.data;
         const $ = cheerio.load(html);
         
         // Buscar metadatos de video
@@ -221,22 +343,42 @@ async function extractFromInstagram(videoUrl: string): Promise<VideoInfo> {
             id: shortcode,
             title: title,
             thumbnail: thumbnail,
-            mp4Url: finalVideoUrl,
-            sizeApprox: undefined,
+            variants: [
+              {
+                url: finalVideoUrl,
+                quality: 'HD',
+                resolution: 'Auto',
+                contentType: 'video/mp4',
+              }
+            ],
           };
         }
         
-        // Buscar en el JSON embebido
-        const scriptMatch = html.match(/"video_url":"([^"]+)"/);
-        if (scriptMatch && scriptMatch[1]) {
-          const videoUrl = scriptMatch[1].replace(/\\u0026/g, '&').replace(/\\/g, '');
-          return {
-            id: shortcode,
-            title: title,
-            thumbnail: thumbnail,
-            mp4Url: videoUrl,
-            sizeApprox: undefined,
-          };
+        // Buscar en scripts embebidos
+        const scripts = $('script').toArray();
+        
+        for (const script of scripts) {
+          const scriptContent = $(script).html();
+          if (scriptContent && scriptContent.includes('video_url')) {
+            const videoUrlMatch = scriptContent.match(/"video_url":"([^"]+)"/);
+            if (videoUrlMatch && videoUrlMatch[1]) {
+              const videoUrl = videoUrlMatch[1].replace(/\\u0026/g, '&').replace(/\\/g, '');
+              
+              return {
+                id: shortcode,
+                title: title,
+                thumbnail: thumbnail,
+                variants: [
+                  {
+                    url: videoUrl,
+                    quality: 'HD',
+                    resolution: 'Auto',
+                    contentType: 'video/mp4',
+                  }
+                ],
+              };
+            }
+          }
         }
       }
     } catch (scrapeError) {
@@ -249,12 +391,41 @@ async function extractFromInstagram(videoUrl: string): Promise<VideoInfo> {
       id: shortcode,
       title: 'Video de Instagram (Demo)',
       thumbnail: 'https://via.placeholder.com/300x300/E4405F/white?text=Instagram',
-      mp4Url: `https://instagram.feoh3-1.fna.fbcdn.net/o1/v/t16/f2/m86/demo-video-${shortcode}.mp4`,
-      sizeApprox: 1500000, // 1.5MB aproximado
+      variants: [
+        {
+          url: `https://instagram.feoh3-1.fna.fbcdn.net/o1/v/t16/f2/m86/demo-video-${shortcode}-720p.mp4`,
+          quality: 'HD',
+          resolution: '720p',
+          contentType: 'video/mp4',
+        },
+        {
+          url: `https://instagram.feoh3-1.fna.fbcdn.net/o1/v/t16/f2/m86/demo-video-${shortcode}-480p.mp4`,
+          quality: 'SD',
+          resolution: '480p',
+          contentType: 'video/mp4',
+        },
+      ],
     };
     
   } catch (error) {
     console.error('[ExtractorService] Error extracting from Instagram:', error);
     throw new Error(`Error al extraer video de Instagram: ${error instanceof Error ? error.message : 'Error desconocido'}`);
   }
+}
+
+// Funciones auxiliares
+function getQualityFromBitrate(bitrate?: number): string {
+  if (!bitrate) return 'SD';
+  if (bitrate >= 2000000) return 'Full HD';
+  if (bitrate >= 1000000) return 'HD';
+  if (bitrate >= 500000) return 'SD';
+  return 'Low';
+}
+
+function getResolutionFromBitrate(bitrate?: number): string {
+  if (!bitrate) return '480p';
+  if (bitrate >= 2000000) return '1080p';
+  if (bitrate >= 1000000) return '720p';
+  if (bitrate >= 500000) return '480p';
+  return '360p';
 }
