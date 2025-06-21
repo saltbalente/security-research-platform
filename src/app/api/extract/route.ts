@@ -207,7 +207,84 @@ async function extractFromTwitterAdvanced(videoUrl: string): Promise<VideoInfo> 
       console.warn('[ExtractorService] Twitter syndication API failed:', syndicationError);
     }
 
-    // Método 3: Web scraping simplificado (último recurso)
+    // Método 3: API de SaveTwitter.net (muy confiable)
+    try {
+      const saveTwitterUrl = `https://savetwitter.net/api/ajaxSearch`;
+      
+      const response = await axios.post(saveTwitterUrl, {
+        q: videoUrl,
+        lang: 'en'
+      }, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; SecurityResearchBot/1.0)',
+          'Accept': 'application/json',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Referer': 'https://savetwitter.net/',
+        },
+        timeout: VERCEL_TIMEOUT,
+        validateStatus: (status) => status < 500,
+      });
+
+      if (response.status === 200 && response.data) {
+        const html = response.data;
+        const $ = cheerio.load(html);
+        
+        // Buscar enlaces de descarga
+        const downloadLinks: VideoVariant[] = [];
+        
+        $('a[href*=".mp4"]').each((_, element) => {
+          const url = $(element).attr('href');
+          const text = $(element).text().toLowerCase();
+          
+          if (url && url.includes('.mp4')) {
+            let quality = 'SD';
+            let resolution = '480p';
+            let bitrate = 500000;
+            
+            if (text.includes('1080p') || text.includes('full hd')) {
+              quality = 'Full HD';
+              resolution = '1080p';
+              bitrate = 2000000;
+            } else if (text.includes('720p') || text.includes('hd')) {
+              quality = 'HD';
+              resolution = '720p';
+              bitrate = 1000000;
+            } else if (text.includes('480p')) {
+              quality = 'SD';
+              resolution = '480p';
+              bitrate = 500000;
+            }
+            
+            downloadLinks.push({
+              url: url,
+              quality: quality,
+              resolution: resolution,
+              bitrate: bitrate,
+              contentType: 'video/mp4',
+            });
+          }
+        });
+        
+        if (downloadLinks.length > 0) {
+          // Ordenar por calidad (bitrate descendente)
+          downloadLinks.sort((a, b) => (b.bitrate || 0) - (a.bitrate || 0));
+          
+          const title = $('title').text() || 'Video de X/Twitter';
+          const thumbnail = $('meta[property="og:image"]').attr('content');
+          
+          return {
+            id: tweetId,
+            title: title,
+            thumbnail: thumbnail,
+            variants: downloadLinks,
+          };
+        }
+      }
+    } catch (saveTwitterError) {
+      console.warn('[ExtractorService] SaveTwitter API failed:', saveTwitterError);
+    }
+
+    // Método 4: Web scraping simplificado (último recurso)
     try {
       const response = await axios.get(videoUrl, {
         headers: {
@@ -252,29 +329,9 @@ async function extractFromTwitterAdvanced(videoUrl: string): Promise<VideoInfo> 
       console.warn('[ExtractorService] Twitter HTML scraping failed:', scrapeError);
     }
 
-    // Fallback: generar variantes de demostración
-    console.warn('[ExtractorService] Using fallback data for Twitter video');
-    return {
-      id: tweetId,
-      title: 'Video de X/Twitter (Demo)',
-      thumbnail: 'https://via.placeholder.com/300x300/1DA1F2/white?text=X',
-      variants: [
-        {
-          url: `https://video.twimg.com/amplify_video/demo-${tweetId}/vid/avc1/1280x720/demo-720p.mp4`,
-          quality: 'HD',
-          resolution: '1280x720',
-          bitrate: 832000,
-          contentType: 'video/mp4',
-        },
-        {
-          url: `https://video.twimg.com/amplify_video/demo-${tweetId}/vid/avc1/640x360/demo-360p.mp4`,
-          quality: 'SD',
-          resolution: '640x360',
-          bitrate: 320000,
-          contentType: 'video/mp4',
-        },
-      ],
-    };
+    // Fallback: informar que no se pudo extraer
+    console.warn('[ExtractorService] All extraction methods failed for Twitter video');
+    throw new Error('No se pudo extraer el video. El tweet puede ser privado, no contener video, o los servicios están temporalmente no disponibles.');
     
   } catch (error) {
     console.error('[ExtractorService] Error extracting from Twitter:', error);
@@ -339,27 +396,9 @@ async function extractFromInstagramAdvanced(videoUrl: string): Promise<VideoInfo
       console.warn('[ExtractorService] Instagram scraping failed:', scrapeError);
     }
     
-    // Fallback: datos de demostración
-    console.warn('[ExtractorService] Using fallback data for Instagram video');
-    return {
-      id: shortcode,
-      title: 'Video de Instagram (Demo)',
-      thumbnail: 'https://via.placeholder.com/300x300/E4405F/white?text=Instagram',
-      variants: [
-        {
-          url: `https://instagram.feoh3-1.fna.fbcdn.net/o1/v/t16/f2/m86/demo-video-${shortcode}-720p.mp4`,
-          quality: 'HD',
-          resolution: '720p',
-          contentType: 'video/mp4',
-        },
-        {
-          url: `https://instagram.feoh3-1.fna.fbcdn.net/o1/v/t16/f2/m86/demo-video-${shortcode}-480p.mp4`,
-          quality: 'SD',
-          resolution: '480p',
-          contentType: 'video/mp4',
-        },
-      ],
-    };
+    // Fallback: informar que no se pudo extraer
+    console.warn('[ExtractorService] All extraction methods failed for Instagram video');
+    throw new Error('No se pudo extraer el video de Instagram. El post puede ser privado, no contener video, o los servicios están temporalmente no disponibles.');
     
   } catch (error) {
     console.error('[ExtractorService] Error extracting from Instagram:', error);
