@@ -14,19 +14,20 @@ Este es un prototipo educativo para analizar URLs de videos de Instagram y X (an
 
 ## Configuración y Ejecución
 
-1.  **Clonar el repositorio (si aplica) o tener los archivos del proyecto.**
+### Desarrollo Local
+
+1.  **Clonar el repositorio:**
+    ```bash
+    git clone <tu-repositorio>
+    cd security-research-platform
+    ```
 
 2.  **Instalar dependencias:**
     ```bash
     npm install
-    # o
-    # yarn install
-    # o
-    # pnpm install 
     ```
 
 3.  **Configurar la base de datos SQLite:**
-    Los archivos de migración se generan basados en `src/db/schema.ts`.
     ```bash
     # Generar archivos de migración (si hay cambios en el schema)
     npm run db:generate
@@ -38,12 +39,20 @@ Este es un prototipo educativo para analizar URLs de videos de Instagram y X (an
 4.  **Ejecutar el servidor de desarrollo:**
     ```bash
     npm run dev
-    # o
-    # yarn dev
-    # o
-    # pnpm dev
     ```
     La aplicación estará disponible en `http://localhost:3000`.
+
+### Deploy en Vercel
+
+1. **Conecta tu repositorio de GitHub con Vercel**
+2. **Configuración automática**: Vercel detectará automáticamente que es un proyecto Next.js
+3. **Variables de entorno**: No se requieren variables de entorno adicionales para este proyecto
+4. **Build automático**: Vercel ejecutará `npm run build` automáticamente
+
+#### Comandos de Build
+- **Desarrollo**: `npm run dev`
+- **Build de producción**: `npm run build`
+- **Servidor de producción**: `npm start`
 
 ## Estructura del Proyecto (Resumen)
 
