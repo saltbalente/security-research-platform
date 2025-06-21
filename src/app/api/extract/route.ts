@@ -38,7 +38,7 @@ export async function POST(request: Request) {
 
     // Para X/Twitter, priorizar formatos HTTP sobre HLS para obtener URLs directas MP4
     // http: URLs directas MP4, hls: archivos .m3u8 (streaming)
-    const command = `yt-dlp -f "http/best" --dump-json --no-warnings "${videoUrl}"`;
+    const command = `/opt/homebrew/bin/yt-dlp -f "http/best" --dump-json --no-warnings "${videoUrl}"`;
     let ytDlpJsonString: string;
 
     try {
